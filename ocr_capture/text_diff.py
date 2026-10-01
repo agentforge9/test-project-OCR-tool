@@ -1,134 +1,124 @@
-"""Return only the *new* text between two OCR captures (live captioning).
+"""Find the *new* words in a live-caption area (pure Python, unit-testable).
 
 How it works, in simple words:
-1. The previous capture is remembered.
-2. Both captures are split into lines and the lines are lined up with
-   ``difflib`` (the same idea as ``git diff``). Lines that exist in both are
-   skipped; lines that scrolled away at the top are ignored.
-3. Lines that changed are looked at more closely:
-   * the old line plus extra words at the end ("Hello" -> "Hello world")
-     gives only the extra part ("world");
-   * a line that is just a slightly different OCR reading of the old one
-     ("He1lo world" vs "Hello world"), or only its beginning, gives nothing;
-   * anything else is a completely new line and is returned whole.
-
-Captions usually scroll up and grow at the bottom, which is exactly the case
-this handles. Pure Python, fully unit-testable.
+* Captions are a moving window over one long stream of words: old words
+  scroll away at the top, new words appear at the end, and the caption
+  engine sometimes corrects its last few words.
+* So we compare *words*, not lines (lines re-wrap all the time). Each new
+  screen is lined up against the previous screen with ``difflib``.
+* The last solid overlap (the "anchor") marks where the old text ends.
+  Every word after it is new.
+* Words at the end of the previous screen that are not in the new screen
+  were corrected by the caption engine. They are "retracted": if they are
+  still waiting in the unsent buffer, they are removed, so the corrected
+  words are not sent twice.
+* ``CaptionTracker`` keeps the previous screen and the unsent buffer.
+  ``take_pending`` hands out everything new since the last call.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from . import config
 
-_WORD = re.compile(r"\S+")
+_NON_WORD = re.compile(r"[^\w]+")
+WORD_SEPARATOR = " "
 
 
-def _normalize(line: str) -> str:
-    """Comparison key: case- and spacing-insensitive."""
-    return " ".join(line.split()).casefold()
+def _word_key(word: str) -> str:
+    """Comparison key: ignores case and punctuation ("And." == "and")."""
+    key = _NON_WORD.sub("", word.casefold())
+    return key or word
 
 
-def _similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b, autojunk=False).ratio()
+@dataclass(frozen=True, slots=True)
+class CaptionUpdate:
+    new_words: tuple[str, ...]
+    # How many of the most recent previous words were corrected or removed.
+    retracted: int = 0
 
 
-def _appended_part(old_line: str, new_line: str, threshold: float) -> str | None:
-    """Words added to the end of ``old_line``.
+def diff_caption_words(
+    previous: Sequence[str],
+    current: Sequence[str],
+    min_anchor_words: int = config.CAPTION_MIN_ANCHOR_WORDS,
+    max_gap_words: int = config.CAPTION_MAX_GAP_WORDS,
+) -> CaptionUpdate:
+    """Words in ``current`` that come after the text already seen in ``previous``."""
+    if not previous:
+        return CaptionUpdate(tuple(current))
 
-    Returns the added text (``""`` if nothing was added) when ``new_line``
-    starts with (a close OCR reading of) ``old_line``; otherwise ``None``.
-    """
-    old_words = old_line.split()
-    new_matches = list(_WORD.finditer(new_line))
-    if not old_words or len(new_matches) < len(old_words):
-        return None
-    new_head = " ".join(m.group() for m in new_matches[: len(old_words)])
-    if _similarity(_normalize(" ".join(old_words)), _normalize(new_head)) < threshold:
-        return None
-    if len(new_matches) == len(old_words):
-        return ""
-    return new_line[new_matches[len(old_words)].start() :].rstrip()
+    blocks = [
+        b
+        for b in SequenceMatcher(
+            None, [_word_key(w) for w in previous], [_word_key(w) for w in current], autojunk=False
+        ).get_matching_blocks()
+        if b.size
+    ]
+    required = min(min_anchor_words, len(previous))
+    anchors = [b for b in blocks if b.size >= required]
+    if not anchors:
+        # No real overlap (only chance matches like "the"): a whole new screen.
+        return CaptionUpdate(tuple(current))
 
+    anchor = anchors[-1]
+    end_prev, end_cur = anchor.a + anchor.size, anchor.b + anchor.size
+    # Small matches shortly after the anchor are the same text with a word
+    # or two corrected/misread in between; extend the anchor over them.
+    for block in blocks[blocks.index(anchor) + 1 :]:
+        if block.a - end_prev > max_gap_words or block.b - end_cur > max_gap_words:
+            break
+        end_prev, end_cur = block.a + block.size, block.b + block.size
 
-def _new_part_of_line(line: str, candidates: Sequence[str], threshold: float) -> str | None:
-    """What is new in ``line`` compared with the old lines it replaced."""
-    if not line.strip():
-        return None if any(not c.strip() for c in candidates) else ""
-
-    filled = [c for c in candidates if c.strip()]
-    for candidate in filled:
-        appended = _appended_part(candidate, line, threshold)
-        if appended is not None:
-            return appended or None
-    # The line is the beginning of an old line (captions re-wrapped): nothing new.
-    if any(_appended_part(line, candidate, threshold) is not None for candidate in filled):
-        return None
-    key = _normalize(line)
-    if any(_similarity(_normalize(c), key) >= threshold for c in filled):
-        return None
-    return line.rstrip()
+    return CaptionUpdate(tuple(current[end_cur:]), retracted=len(previous) - end_prev)
 
 
-def _trim_blank_edges(lines: list[str]) -> str:
-    start, end = 0, len(lines)
-    while start < end and not lines[start].strip():
-        start += 1
-    while end > start and not lines[end - 1].strip():
-        end -= 1
-    return "\n".join(lines[start:end])
+class CaptionTracker:
+    """Remembers the previous screen and collects unsent new words.
 
-
-def extract_new_text(
-    previous: str,
-    current: str,
-    similarity_threshold: float = config.DEFAULT_TEXT_SIMILARITY_THRESHOLD,
-) -> str:
-    """Text in ``current`` that was not already in ``previous``."""
-    if not previous.strip():
-        return _trim_blank_edges(current.splitlines())
-
-    previous_lines = previous.splitlines()
-    current_lines = current.splitlines()
-    matcher = SequenceMatcher(
-        None,
-        [_normalize(ln) for ln in previous_lines],
-        [_normalize(ln) for ln in current_lines],
-        autojunk=False,
-    )
-
-    new_pieces: list[str] = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag in ("equal", "delete"):
-            continue
-        candidates = previous_lines[i1:i2]
-        for line in current_lines[j1:j2]:
-            piece = _new_part_of_line(line, candidates, similarity_threshold)
-            if piece is not None:
-                new_pieces.append(piece)
-    return _trim_blank_edges(new_pieces)
-
-
-class NewTextTracker:
-    """Remembers the last capture and returns only new text for each update.
-
-    Not thread-safe: call it from one thread only (the UI thread).
+    After ``reset`` nothing has been sent yet, so the first screen is new in
+    full: the first take returns all text in the region, later takes only
+    what appeared since. Not thread-safe: use from one thread.
     """
 
-    def __init__(self, similarity_threshold: float = config.DEFAULT_TEXT_SIMILARITY_THRESHOLD) -> None:
-        self.similarity_threshold = similarity_threshold
-        self._previous = ""
+    def __init__(
+        self,
+        min_anchor_words: int = config.CAPTION_MIN_ANCHOR_WORDS,
+        max_gap_words: int = config.CAPTION_MAX_GAP_WORDS,
+    ) -> None:
+        self._min_anchor_words = min_anchor_words
+        self._max_gap_words = max_gap_words
+        self._previous: tuple[str, ...] | None = None
+        self._pending: list[str] = []
 
-    def update(self, current: str) -> str:
-        new_text = extract_new_text(self._previous, current, self.similarity_threshold)
-        # An empty capture (e.g. captions briefly hidden) keeps the memory, so
-        # the same caption is not reported again when it reappears.
-        if current.strip():
-            self._previous = current
-        return new_text
+    @property
+    def pending_text(self) -> str:
+        return WORD_SEPARATOR.join(self._pending)
+
+    def observe(self, words: Sequence[str]) -> CaptionUpdate:
+        """Feed one capture. Returns what changed (already applied to the buffer)."""
+        if not words:
+            # Captions briefly hidden: keep the memory so nothing repeats later.
+            return CaptionUpdate(())
+
+        update = diff_caption_words(self._previous or (), words, self._min_anchor_words, self._max_gap_words)
+        if update.retracted:
+            del self._pending[max(0, len(self._pending) - update.retracted) :]
+        self._pending.extend(update.new_words)
+        self._previous = tuple(words)
+        return update
+
+    def take_pending(self) -> str:
+        """All new words since the last call (empty string if none)."""
+        text = self.pending_text
+        self._pending.clear()
+        return text
 
     def reset(self) -> None:
-        self._previous = ""
+        """Forget everything; the next screen counts as new in full."""
+        self._previous = None
+        self._pending.clear()

@@ -19,6 +19,12 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def resource_path(relative: str) -> Path:
+    """A file bundled with the app (inside the exe when frozen)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / relative
+
+
 def settings_path() -> Path:
     return app_dir() / config.SETTINGS_FILE_NAME
 

@@ -33,7 +33,7 @@ def test_bad_values_fall_back_per_field():
         "hotkeys": {"set_region": "nonsense+key", "capture_image": "ctrl+shift+i", "bogus": "Alt+B"},
         "region": {"left": 1},
         "ocr": {"upscale_factor": "big", "language": "de-DE"},
-        "text_capture": {"similarity_threshold": 5.0},
+        "text_capture": {"poll_interval_ms": 50},
         "unknown_section": {},
     }
     settings, warnings = settings_from_dict(data)
@@ -48,9 +48,15 @@ def test_bad_values_fall_back_per_field():
 
 
 def test_bool_is_not_accepted_as_number():
-    settings, warnings = settings_from_dict({"text_capture": {"live_caption_interval_ms": True}})
-    assert settings.text_capture.live_caption_interval_ms == 0
+    settings, warnings = settings_from_dict({"text_capture": {"poll_interval_ms": True}})
+    assert settings.text_capture.poll_interval_ms == AppSettings().text_capture.poll_interval_ms
     assert warnings
+
+
+def test_obsolete_keys_are_dropped_silently():
+    settings, warnings = settings_from_dict({"text_capture": {"preserve_layout": True, "auto_paste": False}})
+    assert settings.text_capture.auto_paste is False
+    assert warnings == []
 
 
 def test_int_is_accepted_for_float():

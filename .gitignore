@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+dist_new/
 captures/
 settings.json
 settings.json.broken-*

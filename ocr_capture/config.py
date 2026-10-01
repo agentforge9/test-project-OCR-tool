@@ -25,6 +25,10 @@ LOG_FILE_NAME = "ocr_region_capture.log"
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 2
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+# Bundled inside the exe (see OcrRegionCapture.spec); relative to the project root.
+APP_ICON_FILE = "assets/app.ico"
+# Lets Windows show our icon on the taskbar instead of the Python one.
+APP_USER_MODEL_ID = "OcrRegionCapture.App"
 
 
 # --------------------------------------------------------------------------- #
@@ -57,15 +61,18 @@ DEFAULT_HOTKEYS: dict[HotkeyAction, str] = {
 }
 
 ACTION_LABELS: dict[HotkeyAction, str] = {
-    HotkeyAction.SET_REGION: "set_region_hotkey:",
-    HotkeyAction.CAPTURE_NEW_TEXT: "capture_new_text_hotkey:",
-    HotkeyAction.CAPTURE_IMAGE: "capture_image_hotkey:",
-    HotkeyAction.CAPTURE_FREEFORM_IMAGE: "capture_freeform_image_hotkey:",
+    HotkeyAction.SET_REGION: "Set region",
+    HotkeyAction.CAPTURE_NEW_TEXT: "Paste new text",
+    HotkeyAction.CAPTURE_IMAGE: "Capture image",
+    HotkeyAction.CAPTURE_FREEFORM_IMAGE: "Capture freeform image",
 }
 
 ACTION_TOOLTIPS: dict[HotkeyAction, str] = {
     HotkeyAction.SET_REGION: "Drag with the mouse to choose the text region.",
-    HotkeyAction.CAPTURE_NEW_TEXT: "Read the text in the region and output only what is new.",
+    HotkeyAction.CAPTURE_NEW_TEXT: (
+        "Paste the text in the region into the focused text box. First press after setting the region: "
+        "all text. Next presses: only the new text. Nothing new = nothing pasted."
+    ),
     HotkeyAction.CAPTURE_IMAGE: "Click a start point, then an end point. The rectangle is saved silently.",
     HotkeyAction.CAPTURE_FREEFORM_IMAGE: (
         "Click a start point, move the mouse along any path, click again. "
@@ -115,20 +122,39 @@ LAYOUT_FALLBACK_SPACE_WIDTH_RATIO = 0.6
 LAYOUT_MIN_GAPS_FOR_SPACE_CALIBRATION = 3
 
 # --------------------------------------------------------------------------- #
-# New-text detection / output (defaults, settings.json -> "text_capture")
+# Live-caption text capture (defaults, settings.json -> "text_capture")
 # --------------------------------------------------------------------------- #
-# 0..1. Two lines at least this similar are treated as "the same line" even if
-# OCR misread a letter or two.
-DEFAULT_TEXT_SIMILARITY_THRESHOLD = 0.8
+# While running, the region is read silently every N ms and new words are
+# collected, so nothing is lost when captions scroll away between hotkey
+# presses. 0 = no background reading (only read when the hotkey is pressed).
+DEFAULT_CAPTION_POLL_INTERVAL_MS = 500
+CAPTION_POLL_MIN_INTERVAL_MS = 200
+# True = the hotkey pastes the new words into the focused text box (Ctrl+V).
+DEFAULT_AUTO_PASTE = True
+# True = new words are also left on the clipboard (always true with auto paste).
 DEFAULT_COPY_TEXT_TO_CLIPBOARD = True
+# Put before every paste except the first one after Start / set region, so
+# consecutive pastes do not run together ("startimmediately").
+DEFAULT_PASTE_SEPARATOR = " "
 # "" = off. Otherwise a file (relative to the exe folder or absolute) that
-# every new piece of text is appended to - handy as a live-caption transcript.
+# every pasted/copied piece of text is appended to - a caption transcript.
 DEFAULT_TRANSCRIPT_FILE = ""
-# 0 = the hotkey captures once. >0 = the hotkey toggles automatic capturing
-# every N milliseconds (live captioning).
-DEFAULT_LIVE_CAPTION_INTERVAL_MS = 0
-LIVE_CAPTION_MIN_INTERVAL_MS = 200
 TRANSCRIPT_ENCODING = "utf-8"
+
+# Word matching between two caption screens (see text_diff.py).
+# The overlap must be at least this many words in a row to count.
+CAPTION_MIN_ANCHOR_WORDS = 2
+# Up to this many corrected/misread words inside the overlap are tolerated.
+CAPTION_MAX_GAP_WORDS = 2
+
+# Auto paste: wait until the user has released the hotkey's modifier keys
+# (Alt still held + our Ctrl+V would become Ctrl+Alt+V).
+PASTE_KEY_RELEASE_POLL_MS = 20
+PASTE_KEY_RELEASE_TIMEOUT_MS = 3000
+
+# History list in the window.
+HISTORY_TIME_FORMAT = "%H:%M:%S"
+HISTORY_MAX_ITEMS = 500
 
 # --------------------------------------------------------------------------- #
 # Image capture (defaults, settings.json -> "image_capture")
@@ -170,9 +196,6 @@ OVERLAY_BORDER_WIDTH_PX = 2
 # --------------------------------------------------------------------------- #
 # Main window
 # --------------------------------------------------------------------------- #
-WINDOW_MIN_WIDTH_PX = 460
-WINDOW_MIN_HEIGHT_PX = 520
-OUTPUT_MAX_LINES = 5000
-START_BUTTON_MIN_HEIGHT_PX = 40
-STATUS_ERROR_COLOR = "#C62828"
-STATUS_OK_COLOR = "#2E7D32"
+WINDOW_MIN_WIDTH_PX = 520
+WINDOW_MIN_HEIGHT_PX = 640
+START_BUTTON_MIN_HEIGHT_PX = 44

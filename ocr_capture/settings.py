@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 
 JSON_INDENT = 2
 BROKEN_FILE_SUFFIX_FORMAT = ".broken-%Y%m%d-%H%M%S"
+# Settings from older versions: dropped silently (the file is rewritten on start).
+_OBSOLETE_KEYS: dict[str, frozenset[str]] = {
+    "text_capture": frozenset({"preserve_layout", "similarity_threshold", "live_caption_interval_ms"}),
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -52,17 +56,15 @@ class OcrSettings:
 
 @dataclass(frozen=True)
 class TextCaptureSettings:
-    preserve_layout: bool = config.DEFAULT_PRESERVE_LAYOUT
-    similarity_threshold: float = config.DEFAULT_TEXT_SIMILARITY_THRESHOLD
+    poll_interval_ms: int = config.DEFAULT_CAPTION_POLL_INTERVAL_MS
+    auto_paste: bool = config.DEFAULT_AUTO_PASTE
     copy_to_clipboard: bool = config.DEFAULT_COPY_TEXT_TO_CLIPBOARD
+    paste_separator: str = config.DEFAULT_PASTE_SEPARATOR
     transcript_file: str = config.DEFAULT_TRANSCRIPT_FILE
-    live_caption_interval_ms: int = config.DEFAULT_LIVE_CAPTION_INTERVAL_MS
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.similarity_threshold <= 1.0:
-            raise ValueError("similarity_threshold must be greater than 0 and at most 1")
-        if self.live_caption_interval_ms != 0 and self.live_caption_interval_ms < config.LIVE_CAPTION_MIN_INTERVAL_MS:
-            raise ValueError(f"live_caption_interval_ms must be 0 or at least {config.LIVE_CAPTION_MIN_INTERVAL_MS}")
+        if self.poll_interval_ms != 0 and self.poll_interval_ms < config.CAPTION_POLL_MIN_INTERVAL_MS:
+            raise ValueError(f"poll_interval_ms must be 0 or at least {config.CAPTION_POLL_MIN_INTERVAL_MS}")
 
 
 @dataclass(frozen=True)
@@ -148,7 +150,7 @@ def _parse_section(cls: type[_Section], raw: Any, name: str, warnings: list[str]
 
     values: dict[str, Any] = {}
     known = {f.name for f in fields(cls)}  # type: ignore[arg-type]
-    for key in raw.keys() - known:
+    for key in raw.keys() - known - _OBSOLETE_KEYS.get(name, frozenset()):
         warnings.append(f"Unknown setting '{name}.{key}' was ignored.")
     for key in known & raw.keys():
         default = getattr(defaults, key)

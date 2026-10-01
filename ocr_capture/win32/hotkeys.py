@@ -19,7 +19,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject
 
 from .. import config
 from ..hotkey_spec import HotkeySpec
-from . import api
+from . import api, keyboard
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,8 @@ class GlobalHotkeyManager(QObject):
     def _on_hotkey_id(self, hotkey_id: int) -> None:
         action = self._actions_by_id.get(hotkey_id)
         if action is not None:
+            # Must run now, while the user still holds the hotkey's modifiers.
+            keyboard.mask_menu_key_release()
             # Defer: never run app logic inside the native event filter itself.
             QTimer.singleShot(0, lambda: self.activated.emit(action))
 

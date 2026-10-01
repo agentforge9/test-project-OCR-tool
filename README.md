@@ -2,7 +2,8 @@
 
 A small Windows app that reads text from the screen and takes silent screenshots, using global hotkeys.
 
-- Read the text inside a screen area, and get **only the new text** each time (good for live captions).
+- Watch a live-caption area and **paste only the new words** into any text box with one hotkey.
+  If nothing is new, nothing is pasted.
 - Take a rectangle screenshot **silently**: no grey screen, no crosshair, no visible border.
 - Take a **freeform** (any shape) screenshot, also silently.
 - Hotkeys work in every program after you press **Start**. They stop after you press **Stop**.
@@ -14,8 +15,12 @@ A small Windows app that reads text from the screen and takes silent screenshots
 
 1. Open the `dist` folder and double-click **`OcrRegionCapture.exe`**.
 2. Press **Start**.
-3. Press **Alt + ,** and drag over the text you want to read. This sets the region.
-4. Press **Alt + .** to read the text. The new text shows in the window and is copied to the clipboard.
+3. Press **Alt + ,** and drag over the text you want (for example the Windows Live Captions box). This sets the region.
+4. Click into the text box where you want the words (chat, Notepad, a web form...).
+5. Press **Alt + .**. All the text in the region is pasted there.
+6. Press **Alt + .** again later: only the text that appeared **since your last paste** is pasted. Nothing new = nothing pasted.
+
+> If the window you read from moves, set the region again (**Alt + ,**). The region is a fixed place on the screen.
 
 That's all. Press **Stop** to turn the hotkeys off.
 
@@ -29,12 +34,12 @@ That's all. Press **Stop** to turn the hotkeys off.
 | Part | What it does |
 |---|---|
 | **Hotkey boxes** | Show the hotkey for each action. To change one, click the box and press the new keys together (for example hold **Alt + Shift**, then press **/**). The box fills in the name by itself (`Alt+Shift+Slash`). **Backspace** empties a box, which turns that action off. **Esc** cancels the change. The boxes are locked while the app is running. |
-| **Reset hotkeys to defaults** | Puts back the default hotkeys. |
-| **Region: …** | Shows the current text region (position and size in screen pixels). |
-| **Start / Stop** | **Start** turns the hotkeys on for the whole PC. **Stop** turns them off. |
-| **Status line** | Tells you what is happening, or what went wrong (red). |
-| **New text box** | Every piece of new text you capture. |
-| **Clear** | Empties the box **and** forgets the last capture, so the next capture returns all the text again. |
+| **Reset to defaults** | Puts back the default hotkeys. |
+| **Region: …** | Shows the current caption region (position and size in screen pixels). |
+| **Start / Stop** (green / red) | **Start** turns the hotkeys on for the whole PC and starts watching the region. **Stop** turns everything off. |
+| **Status line** | Tells you what is happening (green), or what went wrong (red). |
+| **History** | Every piece of text that was pasted, with the time, oldest at the top. **Double-click** an entry (or select it and press **Copy selected**) to copy it again. |
+| **Clear history** | Empties the history list. |
 | **Open captures folder** | Opens the folder where the screenshots are saved. |
 
 Every change is saved to `settings.json` right away.
@@ -46,7 +51,7 @@ Every change is saved to `settings.json` right away.
 | Setting name | Default hotkey | What it does |
 |---|---|---|
 | `set_region` | **Alt + ,** (`Alt+Comma`) | Drag with the mouse to choose the text region. **Esc** or a right click cancels. |
-| `capture_new_text` | **Alt + .** (`Alt+Period`) | Reads the region and gives you **only the text that is new** since the last capture. |
+| `capture_new_text` | **Alt + .** (`Alt+Period`) | Pastes the region's text into the focused text box. First press after Start / set region: **all** text. Next presses: only text that is **new since the last paste**. Nothing new = nothing pasted. |
 | `capture_image` | **Alt + /** (`Alt+Slash`) | Click a **start** point, then an **end** point. The rectangle is saved silently. |
 | `capture_freeform_image` | **Alt + Shift + /** (`Alt+Shift+Slash`) | Click a **start** point, move the mouse around the shape, click again. The shape is closed with a straight line back to the start and saved silently. |
 
@@ -68,7 +73,7 @@ There are two places. **`settings.json` always wins.**
    },
    ```
 
-2. **`ocr_capture/config.py`, lines 52–57 (`DEFAULT_HOTKEYS`).** These are the defaults. They are used
+2. **`ocr_capture/config.py`, lines 56–61 (`DEFAULT_HOTKEYS`).** These are the defaults. They are used
    when `settings.json` does not exist yet, when a line in it is missing or wrong, and when you press
    **Reset hotkeys to defaults**.
 
@@ -96,16 +101,24 @@ Rules:
 
 ## 4. How each capture works
 
-### Read text (`capture_new_text`)
+### Paste new text (`capture_new_text`)
 
-- The app takes a screenshot of the region and reads it with the **OCR built into Windows**. Nothing extra needs to be installed.
-- The text **keeps its layout**: line breaks, empty lines, indentation and wide gaps between words are rebuilt from where each word sits on screen.
-- The app **remembers the last result** and gives you only what changed:
-  - a line that grew (`Hello` → `Hello world`) gives only `world`;
-  - new lines at the bottom are returned whole;
-  - lines that scrolled away, or that OCR read slightly differently (`He1lo` vs `Hello`), give nothing.
-- The new text is shown in the window and copied to the clipboard. If nothing changed, the status says "No new text."
-- Setting a new region or pressing **Clear** makes the app forget, so the next capture returns everything.
+Works with any text on screen: live captions, a chat, a web page, a document.
+
+- After **Start**, the app quietly reads the region about twice a second with the **OCR built into Windows**
+  (nothing extra to install) and collects the words in a hidden buffer.
+- The **first** reading after Start or after setting the region puts **all** the text in the buffer.
+  Later readings add only words that were not there before.
+- When you press **Alt + .**, the app reads the region once more, then:
+  - **pastes** the collected words into the text box that has the focus (it waits until you let go of Alt, then presses Ctrl+V for you);
+  - leaves them on the clipboard and adds them to the **History** list;
+  - empties the buffer, so the next press gives only words that come after this one.
+- **No new words = nothing happens.** Nothing is pasted and the clipboard is not touched.
+  The status says "No new text since the last paste", or "No text found in the region" if the region shows no text at all.
+- The words are pasted as one line, separated by single spaces (captions re-wrap, so their line breaks mean nothing).
+- Words are never lost when captions scroll away between presses, because the region is read in the background.
+- Consecutive pastes get a space in between, so the words do not run together.
+- If this app's own window has the focus, nothing is pasted (click into your target box first).
 
 ### Silent screenshots (`capture_image`, `capture_freeform_image`)
 
@@ -119,33 +132,31 @@ Rules:
 
 ## 5. Live captioning
 
-**What happens:** captions on screen usually scroll up and grow at the bottom. Each capture is compared
-with the previous one, and only the new words come out. So if you capture again and again, you get a
-clean stream of new caption text with no repeats.
+**How it works (simple version):**
 
-**How to set it up:**
+1. **Background reading.** While running, the region is read every 0.5 s (`poll_interval_ms`).
+2. **Compare words, not lines.** Captions are one long stream of words seen through a small window:
+   old words scroll away at the top, new words appear at the end, and lines re-wrap all the time.
+   So each new reading is turned into a list of words and lined up against the previous reading.
+3. **Find the overlap.** The last place where at least 2 words in a row match (the "anchor") is where
+   the old text ends. Every word after it is new and goes into the buffer. Case and punctuation are
+   ignored (`and.` = `And`), and one or two misread words inside the overlap are tolerated.
+4. **Corrections.** Caption engines often fix their last word (`Mundy` → `Monday`). If a word at the end
+   of the previous reading disappears, it is taken back out of the buffer (if it was not pasted yet),
+   so you get `Monday`, not `Mundy Monday`.
+5. **Deliver on demand.** The hotkey hands out the buffer and empties it. Empty buffer = nothing pasted.
 
-1. Press **Start**, then **Alt + ,** and drag over the caption area only (smaller area = faster and more accurate).
-2. Open `settings.json` and set the interval in milliseconds, for example:
-   ```json
-   "text_capture": {
-     "live_caption_interval_ms": 1000,
-     "transcript_file": "transcript.txt"
-   }
-   ```
-   - `live_caption_interval_ms`: `0` means "capture once per key press". A number (200 or more) means
-     the hotkey turns **automatic capturing** on and off, every that many milliseconds.
-   - `transcript_file`: every new piece of text is also added to this file (next to the exe). Leave it `""` to turn it off.
-3. Press **Stop** and **Start** so the app reads the file again.
-4. Press **Alt + .** once to begin. Press it again to stop.
+**Tips:**
 
-Tips:
-- 500–1000 ms works well. If a capture is still running when the next one is due, the next one is skipped, so it never piles up.
-- If captions are re-read too often (OCR noise), lower `similarity_threshold` a little (for example `0.7`).
-  If real changes are missed, raise it (for example `0.9`).
+- Drag the region over the caption text only. A smaller area is faster and more accurate.
+- Windows Live Captions: put its window over a plain background, because the box is a little see-through.
+- To also keep a full log of everything you pasted, set `"transcript_file": "transcript.txt"`.
+- To save CPU, raise `poll_interval_ms` (for example `1000`). With `0` there is no background reading:
+  each press reads the screen once, so words that scrolled away between two presses are missed.
 
-**In the code:** the comparison logic is `ocr_capture/text_diff.py` (`NewTextTracker`). The timer is in
-`ocr_capture/capture_controller.py` (`capture_new_text` and `_live_timer`).
+**In the code:** word comparison is in `ocr_capture/text_diff.py` (`diff_caption_words`, `CaptionTracker`).
+Background reading and delivery are in `ocr_capture/capture_controller.py` (`_poll_timer`, `_request_read`,
+`_deliver`). Pasting is in `ocr_capture/auto_paster.py`.
 
 ---
 
@@ -157,11 +168,11 @@ Tips:
 | `region` | `null` | The text region. Set with the `set_region` hotkey. |
 | `ocr.language` | `""` | `""` = Windows display language. Or a tag like `"en-US"`, `"de-DE"`. The Windows language pack must be installed. |
 | `ocr.upscale_factor` | `2.0` | Enlarges the image before reading (1.0–4.0). Higher helps with small text. |
-| `text_capture.preserve_layout` | `true` | Keep spacing and empty lines. `false` = simple lines with single spaces. |
-| `text_capture.similarity_threshold` | `0.8` | How alike two lines must be (0–1) to count as "the same line". |
-| `text_capture.copy_to_clipboard` | `true` | Copy new text to the clipboard. |
-| `text_capture.transcript_file` | `""` | File that new text is added to. `""` = off. |
-| `text_capture.live_caption_interval_ms` | `0` | `0` = one capture per key press. 200 or more = automatic capture (see section 5). |
+| `text_capture.poll_interval_ms` | `500` | Read the region in the background every N ms (200 or more). `0` = only read when the hotkey is pressed. |
+| `text_capture.auto_paste` | `true` | Paste new words into the focused text box. `false` = only copy them. |
+| `text_capture.copy_to_clipboard` | `true` | Copy new words to the clipboard when `auto_paste` is `false`. |
+| `text_capture.paste_separator` | `" "` | Put before each paste except the first one after Start / set region. |
+| `text_capture.transcript_file` | `""` | File that every pasted text is added to. `""` = off. |
 | `image_capture.output_folder` | `"captures"` | Where screenshots go. Relative paths are next to the exe. |
 | `image_capture.file_format` | `"png"` | `png`, `jpg` or `bmp`. Only `png` keeps transparency. |
 | `image_capture.copy_to_clipboard` | `true` | Copy screenshots to the clipboard. |
@@ -239,8 +250,11 @@ This installs the packages, runs the tests, and builds `dist\OcrRegionCapture.ex
 | `ocr_capture/region_selector.py` | The drag overlay for `set_region`. |
 | `ocr_capture/screen_capture.py` | Silent screenshots. |
 | `ocr_capture/ocr_engine.py` | Windows OCR. Swap in another engine by implementing `TextRecognizer`. |
-| `ocr_capture/text_layout.py` | Rebuilds spacing and line breaks from word positions. |
-| `ocr_capture/text_diff.py` | Finds only the new text (live captioning). |
+| `ocr_capture/text_layout.py` | OCR word/line types; rebuilds spacing and line breaks from word positions (used by `--check-ocr`). |
+| `ocr_capture/text_diff.py` | Finds only the new caption words (`CaptionTracker`). |
+| `ocr_capture/auto_paster.py` | Waits for you to release the hotkey, then presses Ctrl+V in the focused box. |
+| `ocr_capture/ui/theme.py` | All colours and the window style. |
+| `assets/app.ico` | App icon (window, taskbar, exe). Rebuild it from `assets/app_icon_source.jpg` with `python tools/make_icon.py`. |
 | `ocr_capture/image_output.py` | Freeform mask, saving images. |
 | `ocr_capture/capture_controller.py` | What each hotkey does. |
 | `ocr_capture/ui/` | The window and the hotkey box. |
@@ -262,6 +276,9 @@ The window, `settings.json` and hotkey registration pick it up automatically.
 |---|---|
 | "already used by another program" on Start | Another app owns that hotkey. Choose a different one. |
 | "No region yet" | Press the `set_region` hotkey (default **Alt + ,**) and drag. |
+| "No text found in the region" | The region shows no text. The window probably moved: set the region again with **Alt + ,**. |
+| "No new text since the last paste" | Everything in the region was already pasted. New text will be pasted when it appears. |
+| Words are not pasted | Click into the target text box first. Programs running as administrator do not accept pasting from a normal app; run this app as administrator too. |
 | Text is wrong or missing | Make the region tighter around the text, or raise `ocr.upscale_factor` to `3.0`. |
 | "OCR language … is not installed" | Install that language in Windows settings, or set `ocr.language` to `""`. |
 | Esc does not close the region overlay | Right click instead (Windows sometimes keeps keyboard focus in the other app). |
