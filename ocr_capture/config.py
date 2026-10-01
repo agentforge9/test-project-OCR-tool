@@ -46,6 +46,7 @@ class HotkeyAction(StrEnum):
     CAPTURE_NEW_TEXT = "capture_new_text"
     CAPTURE_IMAGE = "capture_image"
     CAPTURE_FREEFORM_IMAGE = "capture_freeform_image"
+    PASTE_REGION_IMAGE = "paste_region_image"
 
 
 # DEFAULT HOTKEYS ----------------------------------------------------------- #
@@ -58,6 +59,7 @@ DEFAULT_HOTKEYS: dict[HotkeyAction, str] = {
     HotkeyAction.CAPTURE_NEW_TEXT: "Alt+Period",
     HotkeyAction.CAPTURE_IMAGE: "Alt+Slash",
     HotkeyAction.CAPTURE_FREEFORM_IMAGE: "Alt+Shift+Slash",
+    HotkeyAction.PASTE_REGION_IMAGE: "Ctrl+Shift+Period",
 }
 
 ACTION_LABELS: dict[HotkeyAction, str] = {
@@ -65,6 +67,7 @@ ACTION_LABELS: dict[HotkeyAction, str] = {
     HotkeyAction.CAPTURE_NEW_TEXT: "Paste new text",
     HotkeyAction.CAPTURE_IMAGE: "Capture image",
     HotkeyAction.CAPTURE_FREEFORM_IMAGE: "Capture freeform image",
+    HotkeyAction.PASTE_REGION_IMAGE: "Paste region image",
 }
 
 ACTION_TOOLTIPS: dict[HotkeyAction, str] = {
@@ -77,6 +80,10 @@ ACTION_TOOLTIPS: dict[HotkeyAction, str] = {
     HotkeyAction.CAPTURE_FREEFORM_IMAGE: (
         "Click a start point, move the mouse along any path, click again. "
         "The closed shape is saved silently."
+    ),
+    HotkeyAction.PASTE_REGION_IMAGE: (
+        "Take a picture of the region (no region set = the whole main screen) "
+        "and paste it into the focused box."
     ),
 }
 
@@ -167,6 +174,7 @@ DEFAULT_COPY_IMAGE_TO_CLIPBOARD = True
 DEFAULT_IMAGE_BACKGROUND = "#FFFFFF"
 IMAGE_FILE_PREFIX_RECTANGLE = "image"
 IMAGE_FILE_PREFIX_FREEFORM = "freeform"
+IMAGE_FILE_PREFIX_REGION = "region"
 IMAGE_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S_%f"
 JPEG_QUALITY = 95
 

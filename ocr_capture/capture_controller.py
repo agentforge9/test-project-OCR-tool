@@ -10,6 +10,10 @@ Text flow (live captions or any other text):
    press pastes all text in the region, later presses only what is new.
    An empty buffer delivers nothing (clipboard untouched).
 
+Image flow: capture_image / capture_freeform_image save a silently picked
+area; paste_region_image grabs the region (or the main screen when no region
+is set), saves it, and pastes it into the focused box.
+
 Threading model:
 * All public methods and signals run on the UI thread.
 * Slow work (screenshot + OCR, screenshot + save) runs on single-thread
@@ -43,6 +47,7 @@ from .settings import AppSettings, ImageCaptureSettings, OcrSettings
 from .silent_selector import SilentSelector
 from .text_diff import CaptionTracker
 from .text_layout import OcrLine
+from .win32.api import get_primary_screen_rect
 from .win32.mouse_hook import MouseHookError
 
 log = logging.getLogger(__name__)
@@ -82,14 +87,24 @@ class _TextResult:
 
 
 @dataclass(frozen=True)
+class _ImageJob:
+    rect: ScreenRect
+    file_prefix: str
+    polygon: list[Point] | None = None  # freeform: everything outside is made transparent
+    paste: bool = False  # paste into the focused box when done
+
+
+@dataclass(frozen=True)
 class _ImageResult:
     image: Image.Image
     path: Path
+    paste: bool
 
 
 class CaptureController(QObject):
     status = Signal(str, bool)  # message, is_error
     text_delivered = Signal(str)  # new caption words handed to the user
+    image_pasted = Signal(object)  # Path of the saved copy of a pasted image
     region_selected = Signal(object)  # ScreenRect
 
     _text_job_done = Signal(object)  # _TextResult
@@ -100,12 +115,15 @@ class CaptureController(QObject):
         get_settings: Callable[[], AppSettings],
         recognizer_factory: RecognizerFactory = _default_recognizer_factory,
         grab: Grabber = grab_region,
+        primary_screen: Callable[[], ScreenRect] = get_primary_screen_rect,
+        paster: AutoPaster | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._get_settings = get_settings
         self._recognizer_factory = recognizer_factory
         self._grab = grab
+        self._primary_screen = primary_screen
         self._recognizer: TextRecognizer | None = None
         self._recognizer_settings: OcrSettings | None = None
 
@@ -121,7 +139,7 @@ class CaptureController(QObject):
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(lambda: self._request_read(deliver=False))
 
-        self._paster = AutoPaster(self)
+        self._paster = paster or AutoPaster(self)
         self._paster.failed.connect(lambda reason: self.status.emit(reason, True))
 
         self._region_selector = RegionSelector(self)
@@ -140,6 +158,7 @@ class CaptureController(QObject):
             HotkeyAction.CAPTURE_NEW_TEXT: self.capture_new_text,
             HotkeyAction.CAPTURE_IMAGE: lambda: self._toggle_silent_pick(PickMode.RECTANGLE),
             HotkeyAction.CAPTURE_FREEFORM_IMAGE: lambda: self._toggle_silent_pick(PickMode.FREEFORM),
+            HotkeyAction.PASTE_REGION_IMAGE: self.paste_region_image,
         }
 
     # ------------------------------------------------------------------ #
@@ -186,6 +205,17 @@ class CaptureController(QObject):
             self.status.emit("No region yet. Press the set_region hotkey first.", True)
             return
         self._request_read(deliver=True)
+
+    def paste_region_image(self) -> None:
+        """paste_region_image hotkey: picture of the region (or main screen) into the focused box."""
+        rect = self._get_settings().region
+        if rect is None:
+            try:
+                rect = self._primary_screen()
+            except OSError as exc:
+                self.status.emit(str(exc), True)
+                return
+        self._submit_image_job(_ImageJob(rect, config.IMAGE_FILE_PREFIX_REGION, paste=True))
 
     # ------------------------------------------------------------------ #
     # Caption watching
@@ -319,24 +349,26 @@ class CaptureController(QObject):
         if not rect.is_at_least(config.MIN_CAPTURE_SIZE_PX):
             self.status.emit(f"Area too small (minimum {config.MIN_CAPTURE_SIZE_PX} px).", True)
             return
-        self._image_executor.submit(self._run_image_job, mode, points, rect, self._get_settings().image_capture)
+        polygon = points if mode is PickMode.FREEFORM else None
+        self._submit_image_job(_ImageJob(rect, _FILE_PREFIXES[mode], polygon))
 
-    def _run_image_job(
-        self, mode: PickMode, points: list[Point], rect: ScreenRect, image_settings: ImageCaptureSettings
-    ) -> None:
+    def _submit_image_job(self, job: _ImageJob) -> None:
+        self._image_executor.submit(self._run_image_job, job, self._get_settings().image_capture)
+
+    def _run_image_job(self, job: _ImageJob, image_settings: ImageCaptureSettings) -> None:
         """Worker thread."""
         try:
-            image = self._grab(rect)
-            if mode is PickMode.FREEFORM:
-                image = mask_outside_polygon(image, points, rect.origin)
+            image = self._grab(job.rect)
+            if job.polygon is not None:
+                image = mask_outside_polygon(image, job.polygon, job.rect.origin)
             path = save_image(
                 image,
                 resolve_user_path(image_settings.output_folder),
-                _FILE_PREFIXES[mode],
+                job.file_prefix,
                 image_settings.file_format,
                 image_settings.background_color,
             )
-            result: _ImageResult | Exception = _ImageResult(image, path)
+            result: _ImageResult | Exception = _ImageResult(image, path, job.paste)
         except Exception as exc:
             if not isinstance(exc, _EXPECTED_ERRORS):
                 log.exception("Image capture failed")
@@ -348,9 +380,16 @@ class CaptureController(QObject):
             self.status.emit(self._describe_error("Image capture failed", result), True)
             return
         image_settings = self._get_settings().image_capture
+        log.info("Image saved: %s", result.path)
+        if result.paste:
+            # Pasting goes through the clipboard, whatever copy_to_clipboard says.
+            clipboard.copy_image(result.image, image_settings.background_color)
+            self._paster.paste_clipboard()
+            self.image_pasted.emit(result.path)
+            self.status.emit(f"Image pasted (copy saved: {result.path})", False)
+            return
         if image_settings.copy_to_clipboard:
             clipboard.copy_image(result.image, image_settings.background_color)
-        log.info("Image saved: %s", result.path)
         self.status.emit(f"Image saved: {result.path}", False)
 
     @staticmethod

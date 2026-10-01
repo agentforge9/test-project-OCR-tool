@@ -58,6 +58,7 @@ class Application(QObject):
         self._hotkeys.activated.connect(c.handle_action)
         c.status.connect(w.show_status)
         c.text_delivered.connect(w.add_history)
+        c.image_pasted.connect(lambda path: w.add_history(f"[Image] {path}"))
         c.region_selected.connect(self._on_region_selected)
 
     # ------------------------------------------------------------------ #

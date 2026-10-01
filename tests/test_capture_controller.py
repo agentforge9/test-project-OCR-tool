@@ -1,11 +1,12 @@
 """Runs the real caption pipeline (thread, signals, tracker, clipboard) with a fake OCR.
 
-Auto paste is turned off here so the tests never send keystrokes.
+Auto paste is turned off (or the paster faked) so the tests never send keystrokes.
 """
 
 import os
 import time
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -13,10 +14,11 @@ from PIL import Image
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from ocr_capture.auto_paster import AutoPaster  # noqa: E402
 from ocr_capture.capture_controller import CaptureController  # noqa: E402
 from ocr_capture.config import HotkeyAction  # noqa: E402
 from ocr_capture.geometry import ScreenRect  # noqa: E402
-from ocr_capture.settings import AppSettings, TextCaptureSettings  # noqa: E402
+from ocr_capture.settings import AppSettings, ImageCaptureSettings, TextCaptureSettings  # noqa: E402
 from ocr_capture.text_layout import OcrLine, OcrWord  # noqa: E402
 
 TIMEOUT_SECONDS = 5
@@ -125,6 +127,49 @@ def test_background_polling_keeps_words_that_scrolled_away(qt_app):
     controller.handle_action(HotkeyAction.CAPTURE_NEW_TEXT)
     wait_for(qt_app, lambda: len(delivered) == 1)
     assert delivered == ["one two three four five six seven eight nine"]
+    controller.shutdown()
+
+
+class FakePaster(AutoPaster):
+    def __init__(self) -> None:
+        super().__init__()
+        self.pastes = 0
+
+    def paste_clipboard(self) -> None:
+        self.pastes += 1
+
+
+PRIMARY_SCREEN = ScreenRect(0, 0, 64, 48)
+
+
+@pytest.mark.parametrize(
+    ("region", "expected_rect"),
+    [(ScreenRect(10, 20, 30, 40), ScreenRect(10, 20, 30, 40)), (None, PRIMARY_SCREEN)],
+    ids=["region", "no-region-uses-main-screen"],
+)
+def test_paste_region_image(qt_app, tmp_path, region, expected_rect):
+    grabbed: list[ScreenRect] = []
+
+    def grab(rect: ScreenRect) -> Image.Image:
+        grabbed.append(rect)
+        return Image.new("RGB", (rect.width, rect.height), "red")
+
+    settings = AppSettings(region=region, image_capture=ImageCaptureSettings(output_folder=str(tmp_path)))
+    paster = FakePaster()
+    controller = CaptureController(
+        lambda: settings, grab=grab, primary_screen=lambda: PRIMARY_SCREEN, paster=paster
+    )
+    pasted: list[Path] = []
+    controller.image_pasted.connect(pasted.append)
+
+    controller.handle_action(HotkeyAction.PASTE_REGION_IMAGE)
+    wait_for(qt_app, lambda: pasted)
+
+    assert grabbed == [expected_rect]
+    assert paster.pastes == 1
+    assert pasted[0].parent == tmp_path and pasted[0].exists()
+    clip = qt_app.clipboard().image()
+    assert (clip.width(), clip.height()) == (expected_rect.width, expected_rect.height)
     controller.shutdown()
 
 

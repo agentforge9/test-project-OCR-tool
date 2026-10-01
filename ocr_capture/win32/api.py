@@ -9,7 +9,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 
-from ..geometry import Point
+from ..geometry import Point, ScreenRect
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -82,6 +82,10 @@ user32.GetForegroundWindow.argtypes = []
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
+SM_CXSCREEN = 0
+SM_CYSCREEN = 1
 
 # Keyboard input (SendInput). The union must contain the mouse member too, or
 # the INPUT size is wrong and SendInput rejects every event.
@@ -138,3 +142,12 @@ def get_cursor_pos() -> Point:
     if not user32.GetCursorPos(ctypes.byref(point)):
         raise OSError(f"GetCursorPos failed: {last_error_message()}")
     return Point(point.x, point.y)
+
+
+def get_primary_screen_rect() -> ScreenRect:
+    """The main monitor in physical pixels; Windows always puts its top-left at (0, 0)."""
+    width = user32.GetSystemMetrics(SM_CXSCREEN)
+    height = user32.GetSystemMetrics(SM_CYSCREEN)
+    if width <= 0 or height <= 0:
+        raise OSError("Could not read the main screen size.")
+    return ScreenRect(0, 0, width, height)

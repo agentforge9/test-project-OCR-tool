@@ -54,6 +54,7 @@ Every change is saved to `settings.json` right away.
 | `capture_new_text` | **Alt + .** (`Alt+Period`) | Pastes the region's text into the focused text box. First press after Start / set region: **all** text. Next presses: only text that is **new since the last paste**. Nothing new = nothing pasted. |
 | `capture_image` | **Alt + /** (`Alt+Slash`) | Click a **start** point, then an **end** point. The rectangle is saved silently. |
 | `capture_freeform_image` | **Alt + Shift + /** (`Alt+Shift+Slash`) | Click a **start** point, move the mouse around the shape, click again. The shape is closed with a straight line back to the start and saved silently. |
+| `paste_region_image` | **Ctrl + Shift + .** (`Ctrl+Shift+Period`) | Takes a picture of the region and pastes it into the focused box (chat, Word, Paint...). If no region is set yet, it takes the whole **main screen**. |
 
 `Alt+Period` is the **.** key next to **,**. If you meant the **.** on the number pad, click the box and press
 **Alt + numpad .**. It will show as `Alt+Decimal`.
@@ -62,18 +63,19 @@ Every change is saved to `settings.json` right away.
 
 There are two places. **`settings.json` always wins.**
 
-1. **`settings.json` (next to the exe), lines 3–6.** These are the hotkeys the app really uses:
+1. **`settings.json` (next to the exe), lines 3–7.** These are the hotkeys the app really uses:
 
    ```json
    "hotkeys": {
      "set_region": "Alt+Comma",
      "capture_new_text": "Alt+Period",
      "capture_image": "Alt+Slash",
-     "capture_freeform_image": "Alt+Shift+Slash"
+     "capture_freeform_image": "Alt+Shift+Slash",
+     "paste_region_image": "Ctrl+Shift+Period"
    },
    ```
 
-2. **`ocr_capture/config.py`, lines 56–61 (`DEFAULT_HOTKEYS`).** These are the defaults. They are used
+2. **`ocr_capture/config.py`, lines 57–63 (`DEFAULT_HOTKEYS`).** These are the defaults. They are used
    when `settings.json` does not exist yet, when a line in it is missing or wrong, and when you press
    **Reset hotkeys to defaults**.
 
@@ -127,6 +129,14 @@ Works with any text on screen: live captions, a chat, a web page, a document.
 - **Right click**, pressing the **same hotkey again**, or waiting 60 seconds cancels.
 - The image is saved in the `captures` folder next to the exe (for example `image_20261001_101530_123456.png`) and copied to the clipboard.
 - Freeform images are PNG files with a transparent area outside the shape. On the clipboard, the outside is white.
+
+### Paste region image (`paste_region_image`)
+
+- Click into the box where the picture should go, then press **Ctrl + Shift + .**.
+- The app takes a silent picture of the region you set with **Alt + ,**. No region yet = the whole main screen.
+- It waits until you let go of Ctrl and Shift, then presses Ctrl+V for you. The picture stays on the clipboard.
+- A copy is saved in the `captures` folder (`region_....png`) and the History list shows `[Image]` with the file name.
+- The box must accept pictures (chat apps, Word, Paint, email...). Plain text boxes such as Notepad ignore images.
 
 ---
 

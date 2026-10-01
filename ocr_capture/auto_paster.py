@@ -1,6 +1,6 @@
 """Paste the clipboard into whatever text box has the keyboard focus.
 
-The hotkey is still held when the text is ready (e.g. Alt of Alt+.). If we
+The hotkey is still held when the text or image is ready (e.g. Alt of Alt+.). If we
 pressed Ctrl+V now, the target app would see Ctrl+Alt+V. So we wait (polling,
 without blocking the UI) until all modifier keys are released, then send
 Ctrl+V. Releasing a key the user is holding ourselves is not an option: a
@@ -42,7 +42,7 @@ class AutoPaster(QObject):
         if keyboard.modifiers_held():
             if time.monotonic() > self._deadline:
                 self._timer.stop()
-                self.failed.emit("Not pasted: keys were held down too long. The text is on the clipboard.")
+                self.failed.emit("Not pasted: keys were held down too long. It is on the clipboard.")
             return
         self._timer.stop()
         if keyboard.foreground_is_own_window():
@@ -51,4 +51,4 @@ class AutoPaster(QObject):
         try:
             keyboard.send_ctrl_v()
         except OSError as exc:
-            self.failed.emit(f"{exc}. The text is on the clipboard.")
+            self.failed.emit(f"{exc}. It is on the clipboard.")
